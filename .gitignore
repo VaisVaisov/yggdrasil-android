@@ -18,3 +18,4 @@ local.properties
 /app/libs/yggdrasil-sources.jar
 /app/release/*
 /app/release
+gha.jks

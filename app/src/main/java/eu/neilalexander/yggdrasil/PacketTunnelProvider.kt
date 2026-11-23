@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkRequest
 import android.net.VpnService
+import org.json.JSONObject
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.ParcelFileDescriptor
@@ -117,7 +118,7 @@ open class PacketTunnelProvider: VpnService() {
         }
 
         val jsonBytes = config.getJSONByteArray()
-        val logJson = config.getJSON()
+        val logJson = JSONObject(config.getJSON().toString())
         if (logJson.has("PrivateKey")) logJson.put("PrivateKey", "***")
         if (logJson.has("GatewayPassword")) logJson.put("GatewayPassword", "***")
         Log.d(TAG, logJson.toString())
