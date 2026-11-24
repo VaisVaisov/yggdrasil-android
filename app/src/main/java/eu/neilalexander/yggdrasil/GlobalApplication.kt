@@ -22,8 +22,6 @@ class GlobalApplication: Application(), YggStateReceiver.StateReceiver {
     override fun onCreate() {
         super.onCreate()
         config = ConfigurationProxy(applicationContext)
-        val callback = NetworkStateCallback(this)
-        callback.register()
         val receiver = YggStateReceiver(this)
         receiver.register(this)
         migrateDnsServers(this)

@@ -21,7 +21,7 @@ import eu.neilalexander.yggdrasil.PacketTunnelProvider.Companion.STATE_INTENT
 import mobile.Mobile
 import org.json.JSONArray
 
-const val APP_WEB_URL = "https://github.com/yggdrasil-network/yggdrasil-android"
+const val APP_WEB_URL = "https://github.com/VaisVaisov/yggdrasil-android"
 
 class MainActivity : AppCompatActivity() {
     private lateinit var enabledSwitch: Switch

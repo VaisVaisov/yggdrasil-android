@@ -50,7 +50,13 @@ open class PacketTunnelProvider: VpnService() {
     private var readerStream: FileInputStream? = null
     private var writerStream: FileOutputStream? = null
     private var multicastLock: WifiManager.MulticastLock? = null
-    private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var networkSwitch: NetworkSwitchHandler? = null
+    private var tunAddress = ""
+    private var gatewayEnabled = false
+    private var gatewayAddr = ""
+    private var gatewayPort = 0
+    private var gatewayUser = ""
+    private var gatewayPass = ""
 
     override fun onCreate() {
         super.onCreate()
@@ -180,14 +186,21 @@ open class PacketTunnelProvider: VpnService() {
             builder.addRoute("2001:4860:4860::8888", 128)
         }
 
-        val cm = getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
-        networkCallback = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                Log.d(TAG, "Network available, retrying peers")
-                if (started.get()) yggdrasil.retryPeersNow()
-            }
-        }
-        cm.registerNetworkCallback(NetworkRequest.Builder().build(), networkCallback!!)
+        networkSwitch = NetworkSwitchHandler(
+            this,
+            { started.get() },
+            { attempt ->
+                if (attempt == 0) {
+                    restartYggdrasil()
+                    if (gatewayEnabled) {
+                        restartExitNode()
+                    }
+                } else {
+                    Log.d(TAG, "peer retry attempt $attempt")
+                    yggdrasil.retryPeersNow()
+                }
+            },
+        ).also { it.start() }
 
         parcel = builder.establish()
         val parcel = parcel
@@ -198,10 +211,16 @@ open class PacketTunnelProvider: VpnService() {
 
         readerStream = FileInputStream(parcel.fileDescriptor)
         writerStream = FileOutputStream(parcel.fileDescriptor)
+        tunAddress = address
+        gatewayEnabled = hasGateway
+        this.gatewayAddr = config.gatewayAddress
+        gatewayPort = config.gatewayPort
+        gatewayUser = config.gatewayUsername
+        gatewayPass = config.gatewayPassword
         if (hasGateway) {
-            val port = config.gatewayPort
-            val username = config.gatewayUsername
-            val password = config.gatewayPassword
+            val port = gatewayPort
+            val username = gatewayUser
+            val password = gatewayPass
             Log.i(TAG, "Starting exitnode gateway=$gatewayAddr port=$port auth=${username.isNotEmpty()}")
             Exitnode.start(address, gatewayAddr, port.toLong(), yggdrasil.mtu, username, password)
             readerThread = thread { exitNodeReader() }
@@ -220,14 +239,43 @@ open class PacketTunnelProvider: VpnService() {
         LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
     }
 
+    private fun restartYggdrasil() {
+        Log.i(TAG, "restarting yggdrasil core after network switch")
+        try {
+            yggdrasil.stop()
+            // A stopped core is not reliably restartable in place, so start a
+            // fresh instance and re-apply the socket protector.
+            yggdrasil = Yggdrasil()
+            yggdrasil.setProtector(object : mobile.MobileProtector {
+                override fun protect(fd: Long) { protect(fd.toInt()) }
+            })
+            yggdrasil.startJSON(config.getJSONByteArray())
+            Log.i(TAG, "yggdrasil core restarted, address ${yggdrasil.addressString}")
+        } catch (t: Throwable) {
+            Log.w(TAG, "yggdrasil restart failed", t)
+        }
+    }
+
+    private fun restartExitNode() {
+        Log.i(TAG, "restarting exit node after network switch")
+        try {
+            Exitnode.stop()
+            Exitnode.start(
+                tunAddress, gatewayAddr, gatewayPort.toLong(), yggdrasil.mtu, gatewayUser, gatewayPass,
+            )
+        } catch (t: Throwable) {
+            Log.w(TAG, "exit node restart failed", t)
+        }
+    }
+
     private fun stop() {
         if (!started.compareAndSet(true, false)) {
             return
         }
 
-        networkCallback?.let {
-            (getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager).unregisterNetworkCallback(it)
-            networkCallback = null
+        networkSwitch?.let {
+            it.stop()
+            networkSwitch = null
         }
 
         Exitnode.stop()
